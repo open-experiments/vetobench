@@ -25,6 +25,26 @@ to a hash-chained audit log.
 └──────────────────────────────────────────────┘
 ```
 
+## Program scope
+
+VetoBench is the test bench for the tool-call trust boundary: how much a gate on each proposed
+call reduces unsafe actions, what it wrongly blocks, what it costs, and what record it leaves.
+Today it measures one layer, a call-only judge. The roadmap adds the other layers of a gate as
+judge kinds, so a run reports what each layer adds:
+
+| Layer | Decides | Status |
+| --- | --- | --- |
+| 1. Injection guards (vLLM-SR `toolcall-sentinel`, `toolcall-verifier`) | Injected request or argument | planned: `classifier` judge |
+| 2. Value gate (Agent Exchange `aex-toolgate`) | Argument values against named rules | planned: `rule` judge |
+| 3. Residual judge (SLM, Granite Guardian, Llama Guard) | Unsafe call beyond the rules | available |
+| 4. Hold | Escalate to a person | planned: `hold` outcome |
+
+A companion study on tool-call authorization records supplies the record specification (nine
+fields, five scoring rules); VetoBench supplies it with live-model evidence. The audit record
+moves to `vetobench/v2` to carry all nine fields. Scope, reuse of adjacent work (ToolScope and
+BFCL, vLLM Semantic Router, Decision 1.0, TelcoAIBench) and the phased roadmap are in
+[`docs/program-scope.md`](docs/program-scope.md).
+
 ## Arms
 
 The arm is part of the model name, so benchmarks need nothing but a `base_url` change:
