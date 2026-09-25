@@ -7,6 +7,7 @@ name = "vetobench"
 version = "0.1.0"
 description = "Measure how much an SLM tool-call judge reduces unsafe agent actions on Agent-SafetyBench and ASB."
 requires-python = ">=3.10"
+license = { text = "MIT" }
 dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
