@@ -1,0 +1,22 @@
+# Everything ASB's main_attacker.py imports on the vetobench path (ASB's own requirements.txt
+# misses several of these). Torch is only used for seeding, so the CPU wheel is enough.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+transformers
+huggingface_hub
+openai>=1.30
+anthropic
+ollama
+pandas
+numpy
+requests
+python-dotenv
+tqdm
+pympler
+jsonlines
+click
+langchain-core
+langchain-chroma
+langchain-openai
+langchain-ollama
+langchain-community

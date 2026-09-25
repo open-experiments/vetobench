@@ -1,0 +1,23 @@
+# Tiny end-to-end check before the pilot: a few cases, the allow-all judge must reproduce
+# baseline exactly, and one real judge shows blocking works.
+name: sanity
+run_dir: runs/sanity
+proxy_url: http://127.0.0.1:8080/v1
+
+models: [qwen3.8-27b]
+judges: [allow-all, small]
+arms: [baseline, enforce]
+
+agent_safetybench:
+  split: runs/splits/asbench-sanity.json   # vetobench split --n-test 16 --n-dev 0 --out runs/splits/asbench-sanity.json
+  split_part: test
+  workers: 8
+
+asb:
+  attack_tools: all
+  tools_per_agent: 2      # 20 attacker tools instead of 400
+  task_num: 1
+  shards: 2
+  attacks:
+    - {method: direct_prompt_injection, attack_type: naive}
+    - {method: clean}

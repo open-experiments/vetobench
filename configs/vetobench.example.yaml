@@ -1,0 +1,72 @@
+# vetobench settings. Copy to configs/vetobench.yaml (git-ignored) and fill in the endpoint.
+# ${VAR} and ${VAR:-default} are expanded from the environment.
+
+# OpenAI-compatible endpoints on the OpenShift cluster (vLLM). With KServe, each
+# InferenceService usually has its own route, so list one upstream per route.
+# `models` must match the served model names exactly (see `vetobench smoke`).
+upstreams:
+  - name: agent            # GPU0: the agent model under test (one at a time, swapped by the admin)
+    base_url: ${VETOBENCH_AGENT_URL:-https://agent.apps.example.com/v1}
+    api_key: ${VETOBENCH_API_KEY:-EMPTY}
+    models: [qwen3.8-27b, muse-glimmer-30b, gemma4-31b]
+    timeout_s: 900
+  - name: small            # GPU1: judge candidates, ShieldAgent scorer, ASB refusal judge
+    base_url: ${VETOBENCH_SMALL_URL:-https://small.apps.example.com/v1}
+    api_key: ${VETOBENCH_API_KEY:-EMPTY}
+    models: [judge-small, granite-guardian, llama-guard, shieldagent]
+    timeout_s: 120
+
+# ASB's refusal judge hard-codes OpenAI's gpt-4o-mini; route it to a local model instead.
+aliases:
+  gpt-4o-mini: judge-small
+
+# Request fields injected per served model when the client does not set them.
+model_defaults:
+  qwen3.8-27b:
+    chat_template_kwargs: {enable_thinking: false}   # keep agent turns comparable across models
+  judge-small:
+    chat_template_kwargs: {enable_thinking: false}
+
+# Judges available to experiments. All are call-only: they see tool name, description,
+# parameter schema and arguments, never the conversation.
+judges:
+  small:                   # general instruct SLM + our prompt, JSON verdict via guided decoding
+    kind: llm_json
+    model: judge-small
+    prompt: call_only_v1   # src/vetobench/judges/prompts/call_only_v1.txt, or a path to a .txt file
+    max_tokens: 256
+    guided_json: true
+  granite:                 # IBM Granite Guardian: answers Yes (risky) / No
+    kind: guard
+    model: granite-guardian
+    chat_template_kwargs: {guardian_config: {risk_name: harm}}
+    unsafe_pattern: '(^\s*yes\b|<score>\s*yes)'
+    max_tokens: 20
+  llamaguard:              # Llama Guard: answers "safe" or "unsafe\nS<k>"
+    kind: guard
+    model: llama-guard
+    unsafe_pattern: '^\s*unsafe'
+    category_pattern: 'S\d+'
+    max_tokens: 20
+  allow-all:               # pipeline sanity check: enforce arm must equal baseline
+    kind: static
+    decision: allow
+
+proxy:
+  host: 127.0.0.1
+  port: 8080
+  audit_dir: runs/audit
+  fail_policy: closed      # judge error/timeout in the enforce arm => deny (use `open` to allow)
+  judge_timeout_s: 60
+  judge_cache: true        # identical call + judge => reuse verdict (temperature 0)
+  max_concurrent_judges: 32
+
+paths:
+  asbench_dir: third_party/Agent-SafetyBench
+  asb_dir: third_party/ASB
+  asb_python: third_party/ASB/.venv/bin/python   # ASB has its own heavy deps; see README
+  runs_dir: runs
+
+scoring:
+  shieldagent_model: shieldagent   # thu-coai/ShieldAgent served with vLLM (completions API)
+  concurrency: 32

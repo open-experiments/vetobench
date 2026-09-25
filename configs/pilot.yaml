@@ -1,0 +1,29 @@
+# Pilot experiment: 3 agent models x (baseline + enforce per judge) x {Agent-SafetyBench subset, ASB}.
+name: pilot
+run_dir: runs/pilot
+proxy_url: http://127.0.0.1:8080/v1
+
+models: [qwen3.8-27b, muse-glimmer-30b, gemma4-31b]
+judges: [small, granite, llamaguard]
+# baseline: agent unguarded, calls logged (judges are evaluated on these offline via `replay`).
+# enforce:  one variant per judge, denied calls removed.
+# shadow:   optional online equivalent of replay; add it here if you want live shadow numbers.
+arms: [baseline, enforce]
+
+agent_safetybench:
+  split: runs/splits/asbench-pilot.json   # made by `vetobench split`
+  split_part: test                        # never report on `dev` (used to develop the judge prompt)
+  workers: 16
+  max_tokens: 2048
+
+asb:
+  attack_tools: all        # 400 attacker tools across 10 agents
+  task_num: 1              # tasks per agent per attacker tool (ASB default)
+  shards: 8                # parallel main_attacker processes
+  max_new_tokens: 1024
+  attacks:
+    - {method: direct_prompt_injection, attack_type: naive}
+    - {method: direct_prompt_injection, attack_type: combined_attack}
+    - {method: observation_prompt_injection, attack_type: naive}
+    - {method: observation_prompt_injection, attack_type: combined_attack}
+    - {method: clean}      # no attack: task success here measures over-blocking
