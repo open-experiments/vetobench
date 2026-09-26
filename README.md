@@ -91,6 +91,10 @@ disable verification. In `configs/vetobench.yaml`, `verify_tls` takes the bundle
 (relative to the repo root, or absolute); the venice config defaults to `../venice-ca.crt`
 and can be overridden with `VETOBENCH_CA_BUNDLE`.
 
+**`oc` client.** Download the build matching the cluster from the console (**?** →
+*Command Line Tools*), or directly:
+`curl --cacert venice-ca.crt -O https://downloads-openshift-console.apps.venice.narlabs.io/amd64/linux/oc.tar && tar -xf oc.tar oc && install oc ~/.local/bin/`.
+
 **Secrets.** `Secret vllm-secrets` holds `VLLM_API_KEY` (bearer token for all routes) and
 `HF_TOKEN` (for gated models). Never print, log or commit them. Get the key into your shell
 without echoing it:
@@ -117,12 +121,19 @@ Exposed by `Service vllm-agent` (port 8000) and `Route vllm-agent`. Known cosmet
 "Unknown vLLM environment variable VLLM_AGENT_*" comes from service links
 (`enableServiceLinks: false` removes it).
 
-Swap the agent model under test (the served name must match the experiment config exactly,
-and the tool parser must fit the model family):
+Swap the agent model under test with `scripts/swap-agent-model.sh <served name>` (e.g.
+`qwen3.8-27b`). It sets `MODEL_ID`, `SERVED_NAME`, `TOOL_PARSER` and `EXTRA_ARGS` on
+`vllm-agent`, waits for the rollout, then waits until the route lists the model. The first start
+of a model downloads its weights into `model-cache`. To add a model, add a case to the script
+with its Hugging Face id (the `owner/name` part of its huggingface.co URL), the vLLM tool-call
+parser for its family (see the model's vLLM recipe at https://recipes.vllm.ai), and extra flags.
 
-```bash
-oc set env deploy/vllm-agent MODEL_ID=<hf id> SERVED_NAME=<served name> TOOL_PARSER=<parser>
-```
+| served name | Hugging Face id | tool parser | extra flags |
+|---|---|---|---|
+| `qwen3-8b-test` | `Qwen/Qwen3-8B` | `hermes` | |
+| `qwen3.8-27b` | `Qwen/Qwen3.8-27B` | `qwen3_xml` | `--language-model-only --reasoning-parser qwen3` |
+| `muse-glimmer-30b` | TBD | | |
+| `gemma4-31b` | TBD | | |
 
 The 27–31B agent models are expected to fit in BF16; if they run out of memory at 32k context
 and 16 parallel episodes, add `--quantization fp8` and record it here.
