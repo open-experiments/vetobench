@@ -240,6 +240,83 @@ vetobench verify-audit runs/audit/*.jsonl    # hash chain intact?
 Every step is resumable: finished cases, shards, scores and replays are skipped on re-run.
 Useful filters: `--variant baseline enforce-granite`, `--bench asbench`.
 
+## Tool-retrieval study (Vincent's BFCL harness) — planned
+
+Status: planned, nothing run yet. This section records what the study is and how it connects to
+vetobench.
+
+**What Vincent measured.** In [*Improve SLM tool calling without
+post-training*](https://thinkinginsidethebox.ai/aaif/engineering/2026/09/17/tool-retrieval-for-slm-agents.html)
+(2026-09-17), Vincent Caldeira gives an agent either the whole tool catalog or only the tools a
+retriever shortlists for the request, and scores one tool call per query. It is a correctness
+test, not a safety test:
+
+* **Retriever:** [ToolScope](https://github.com/ilya-kolchinsky/ToolScope) (library by Ilya
+  Kolchinsky) embeds tool names and descriptions with `sentence-transformers/all-MiniLM-L6-v2`
+  and keeps the top k per request, like RAG for tools. A BM25 keyword retriever did about as
+  well. It runs on CPU, next to the agent; no GPU model is involved.
+* **Harness (Vincent's):** `eval/` in the ToolScope repo. `eval/paper/bfcl_multiple.yaml` is
+  the paper protocol: the BFCL *multiple* split, 443 functions in one shared catalog, 200
+  queries, baseline (full catalog) vs BM25 vs ToolScope at k = 5, 10 and 20. Scores are *name
+  accuracy* (right function) and *AST accuracy* (BFCL's check of name, argument names and
+  values against the gold call).
+* **Models:** Llama 3.2 3B, Qwen2.5 7B, Llama 3.1 8B, Qwen3 32B and Llama 3.3 70B, as GGUF files
+  (Q4_K_M or Q8_0) served with llama.cpp on a DGX Spark, 32k context
+  (`eval/local/models.yaml`).
+* **Result:** with a 10-tool shortlist, Llama 3.1 8B names the right tool 92% of the time (6% on
+  the full catalog), ahead of Llama 3.3 70B on the full catalog (79%). AST accuracy stays at
+  46–61%; the errors left are mostly wrong arguments.
+
+**How it connects to vetobench.** The harness has an OpenAI-compatible backend
+(`OPENAI_BASE_URL`, `OPENAI_API_KEY`), and veto-proxy takes the arm from the model name, so the
+harness runs **unmodified** against the proxy, the same way ASB does:
+
+```
+ harness (bfcl_eval) ── ToolScope/BM25 shortlist (CPU) ── chat call, model = qwen2.5-7b@baseline
+        │                                                                  or qwen2.5-7b@enforce:<gate>
+        ▼
+ veto-proxy :8080 ── audit log, gate rules on each call ── vLLM on GPU0
+```
+
+Untested sketch:
+
+```bash
+git clone https://github.com/ilya-kolchinsky/ToolScope third_party/ToolScope   # install per its eval/README.md
+export OPENAI_BASE_URL=http://127.0.0.1:8080/v1 OPENAI_API_KEY=unused          # the proxy holds the real key
+# copy eval/paper/bfcl_multiple.yaml; set model entries to vetobench routes, e.g. qwen2.5-7b@baseline
+python eval/run_eval.py --config <that copy>
+```
+
+Every call lands in `runs/audit/` like the safety benchmarks. The harness computes its own
+name/AST accuracy per arm; the gate's effect is the change between the baseline and enforce arms
+(how many wrong-argument calls it stops, and how many correct calls it wrongly stops).
+
+**Plan.**
+
+1. **Retrieval with Qwen.** Does a shortlist let a small Qwen model match a large one on the
+   full catalog? Candidates: `Qwen/Qwen2.5-7B-Instruct` (in Vincent's slate, so his numbers are
+   a reference) against `Qwen/Qwen2.5-72B-Instruct` in FP8 (~72 GB, one GPU), the Qwen
+   counterpart of his 70B. Both are public (no Hugging Face gating). Alternative with no new
+   downloads: Qwen3-8B against Qwen3.8-27B. Added as cases in `scripts/swap-agent-model.sh`.
+2. **Gate.** Fatih's value gate, `aex-toolgate` (Go, merged in AEX PR #59), enforces a per-tool
+   policy: scopes, then value rules (ceiling, allowlist, lookup, prefix, suffix). Its only policy
+   today covers twelve accounts-payable tools; BFCL's 443 functions have none. Open with Fatih:
+   where the rules come from (e.g. generated from each function's JSON schema) and how
+   vetobench calls the gate (a `rule` judge kind calling the Go service, or the rules ported).
+   The SLM judge and guard models can run as further arms once GPU1 is up.
+
+**Things to watch.**
+
+* **Context length.** The full 443-tool catalog is about 60k tokens of tool definitions, but
+  vLLM here runs at `--max-model-len 32768` and rejects longer prompts. The full-catalog
+  baseline needs at least ~65k (Qwen2.5 goes to 128k with YaRN rope scaling). Vincent's runs
+  also used 32k, so some of his full-catalog failures for small models may be prompts that did
+  not fit rather than wrong choices; ask him.
+* **Precision.** We serve BF16 (FP8 for 72B) with vLLM, not his GGUF quantizations, so re-run
+  the baseline here instead of reusing his numbers; the gate comparison uses the same serving
+  for both arms anyway.
+* **Thinking.** Keep `enable_thinking: false` (via `model_defaults`) for Qwen3-family models.
+
 ## Faithfulness to the benchmarks
 
 * **Agent-SafetyBench**: `vetobench.adapters.agent_safetybench` ports `evaluation/eval.py`'s
