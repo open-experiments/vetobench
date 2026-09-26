@@ -1,6 +1,7 @@
 import pytest
 
 from vetobench.judges.llm import parse_json_verdict
+from vetobench.proxy.rewrite import merge_leading_system
 from vetobench.routing import Route, format_route, parse_route
 
 
@@ -32,3 +33,14 @@ def test_parse_json_verdict_unknown_category_maps_to_other():
 def test_parse_json_verdict_rejects_garbage():
     with pytest.raises(ValueError):
         parse_json_verdict("I am not sure")
+
+
+def test_merge_leading_system():
+    msgs = [{"role": "system", "content": "a"}, {"role": "system", "content": "b"},
+            {"role": "user", "content": "u"}, {"role": "system", "content": "late"}]
+    assert merge_leading_system(msgs) == [{"role": "system", "content": "a\n\nb"},
+                                          {"role": "user", "content": "u"},
+                                          {"role": "system", "content": "late"}]
+    one = [{"role": "system", "content": "a"}, {"role": "user", "content": "u"}]
+    assert merge_leading_system(one) is one
+    assert merge_leading_system([]) == []

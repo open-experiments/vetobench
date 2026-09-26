@@ -195,6 +195,27 @@ The route returns 401 without the key; that is expected.
   * The refusal rate (100% under attack, 94% clean) is **not usable**: Qwen3-8B answers "0"
     (did not comply) even for transcripts where the agent did the task. Re-measure with a
     proper judge model.
+* **2026-09-26** `vllm-agent` manifest exported to `deploy/openshift/`, then changed to pass
+  `$EXTRA_ARGS` and to disable service links. Swapped GPU0 to **`qwen3.8-27b`**
+  (`Qwen/Qwen3.8-27B`, BF16, no FP8 needed): first start downloads the weights in ~8 min
+  (50 GiB loaded), KV cache 479k tokens (14.6× at 32k context). It needs `--max-num-seqs 64`:
+  vLLM's default of 1024 sequences exceeds the 708 state blocks for its linear-attention
+  layers, and vLLM then refuses to start (crash loop). `vetobench smoke` passes (parsed tool
+  call, ~1.1 s); integer, boolean and array arguments come back with correct JSON types, and
+  `enable_thinking: false` leaves no reasoning text.
+* **2026-09-26** Sanity run on **`qwen3.8-27b`** (`configs/sanity.yaml`, baseline vs allow-all;
+  ASB's refusal judge temporarily aliased to `qwen3.8-27b`). First attempt: every ASB request
+  failed with `400 System message must be at the beginning`, because ASB opens with several
+  system messages and Qwen3.8's chat template accepts only one, first. The proxy now merges the
+  leading system messages into one in every arm (contents joined in order). The Qwen3-8B ASB
+  numbers above predate this change (its template accepted several system messages).
+  * Agent-SafetyBench, 16 cases: allow-all made the same tool calls as baseline in 16/16 (8
+    identical word for word, 8 differ only in the final text). No thinking text leaked.
+  * ASB direct prompt injection (naive), 20 attacker tools: **ASR 45%** [25.8, 65.8] (Qwen3-8B:
+    100%), original-task success 0%. Clean, 50 tasks: **task success 82%** [69.2, 90.2]
+    (Qwen3-8B: 42%), ASR 0%. Allow-all ΔASR = 0 and identical task success.
+  * Refusal (50% attack / 22% clean) is still measured with a stand-in judge; treat as
+    provisional until `judge-small` is deployed.
 
 ## Running
 
@@ -234,7 +255,9 @@ Useful filters: `--variant baseline enforce-granite`, `--bench asbench`.
   processes. ASB's `gpt-4o-mini` refusal judge is routed to `judge-small` via `aliases`, so
   refusal rates are not directly comparable to the ASB paper's.
 * **Proxy normalisation** is applied in *every* arm: tools without a JSON-schema `parameters`
-  (ASB) get an empty object schema, since vLLM rejects them otherwise.
+  (ASB) get an empty object schema, since vLLM rejects them otherwise, and the system messages
+  that open a conversation (ASB sends several) are merged into one, since some chat templates
+  (Qwen3.8) reject a system message anywhere but first.
 
 ## Judges
 
@@ -268,11 +291,3 @@ tests/          unit + proxy tests, fake_vllm.py (GPU-free end-to-end stand-in)
 
 GPU-free end-to-end check: `uvicorn tests.fake_vllm:app --port 18000`, then point a copy of the
 config at `http://127.0.0.1:18000/v1` and run `configs/sanity.yaml`.
-* **2026-09-26** `vllm-agent` manifest exported to `deploy/openshift/`, then changed to pass
-  `$EXTRA_ARGS` and to disable service links. Swapped GPU0 to **`qwen3.8-27b`**
-  (`Qwen/Qwen3.8-27B`, BF16, no FP8 needed): first start downloads the weights in ~8 min
-  (50 GiB loaded), KV cache 479k tokens (14.6× at 32k context). It needs `--max-num-seqs 64`:
-  vLLM's default of 1024 sequences exceeds the 708 state blocks for its linear-attention
-  layers, and vLLM then refuses to start (crash loop). `vetobench smoke` passes (parsed tool
-  call, ~1.1 s); integer, boolean and array arguments come back with correct JSON types, and
-  `enable_thinking: false` leaves no reasoning text.

@@ -146,23 +146,31 @@ OpenShift*.
   * Not yet available: the Agent-SafetyBench safety score (needs ShieldAgent). The ASB refusal
     rate is not usable, because Qwen3-8B, standing in as ASB's refusal judge, marks completed
     tasks as refusals.
-* **Fixes on the way.** The ASB launcher no longer needs conda and no longer hangs at exit.
+* **Qwen3.8-27B sanity run** (`configs/sanity.yaml`, baseline vs allow-all):
+  * Agent-SafetyBench, 16 cases: allow-all made the same tool calls as baseline in 16/16.
+  * ASB direct prompt injection (naive), 20 attacker tools: attack success 45% (9/20, 95% CI
+    25.8–65.8), against 100% for Qwen3-8B; original-task success 0%.
+  * ASB clean, 50 tasks: task success 82% (Qwen3-8B: 42%); attack success 0%. Allow-all
+    matches baseline on attack and task success.
+  * Refusal is again measured with a stand-in judge (Qwen3.8-27B itself), so it is provisional.
+* **Fixes on the way.** The ASB launcher no longer needs conda and no longer hangs at exit. The
+  proxy merges the system messages that open a conversation into one (every arm), because
+  Qwen3.8's chat template rejects ASB's second system message; before this fix every ASB
+  request to Qwen3.8 failed.
 
 ## What's next
 
-1. **Sanity run on `qwen3.8-27b`**: baseline and allow-all, same size as the 8B run. Needs a
-   copy of `configs/baseline-8b.yaml` with the model changed.
-2. **GPU1 small models**: one pod requesting one GPU runs `judge-small`, `granite-guardian`,
+1. **GPU1 small models**: one pod requesting one GPU runs `judge-small`, `granite-guardian`,
    `llama-guard` and `shieldagent` as four vLLM servers (ports 8001–8004, about 0.2 of GPU
    memory each), behind one Service and four routes. `llama-guard` is gated and needs
    `HF_TOKEN`. The two pods together must stay within the 96Gi memory-request quota.
-3. **Score and re-measure**: score the Agent-SafetyBench runs with ShieldAgent (finished runs are
+2. **Score and re-measure**: score the Agent-SafetyBench runs with ShieldAgent (finished runs are
    scored without re-running), point ASB's refusal judge back to `judge-small`, and re-measure
    refusal.
-4. **Remaining agent models**: get the Hugging Face ids for `muse-glimmer-30b` and `gemma4-31b`,
+3. **Remaining agent models**: get the Hugging Face ids for `muse-glimmer-30b` and `gemma4-31b`,
    add them to the swap script with their tool parsers, and run the smoke check.
-5. **Pilot**: the 300-case Agent-SafetyBench split and all 400 ASB attacker tools across the
+4. **Pilot**: the 300-case Agent-SafetyBench split and all 400 ASB attacker tools across the
    five attack settings, per agent model; baseline plus enforce per judge; replay all judges on
    the baseline calls; report.
-6. **Phase 0 (no GPUs)**: the `vetobench/v2` record, the `rule` and `classifier` judge kinds, and
+5. **Phase 0 (no GPUs)**: the `vetobench/v2` record, the `rule` and `classifier` judge kinds, and
    the twelve-call regression suite. Not started.

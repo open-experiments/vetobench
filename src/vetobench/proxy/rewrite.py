@@ -23,6 +23,27 @@ def normalize_tools(tools: list[dict] | None) -> list[dict] | None:
     return out
 
 
+
+def merge_leading_system(messages: list[dict] | None) -> list[dict] | None:
+    """Merge the system messages that open a conversation into one.
+
+    ASB starts every conversation with several system messages (role, tool list, planning
+    instructions). Some chat templates, e.g. Qwen3.5/3.8, reject a system message anywhere but
+    first. Contents are joined in order, so nothing is reordered or dropped. Applied in every
+    arm, like ``normalize_tools``.
+    """
+    if not messages:
+        return messages
+    n = 0
+    while n < len(messages) and messages[n].get("role") == "system" \
+            and isinstance(messages[n].get("content"), str):
+        n += 1
+    if n < 2:
+        return messages
+    merged = {"role": "system", "content": "\n\n".join(m["content"] for m in messages[:n])}
+    return [merged, *messages[n:]]
+
+
 def refusal_text(template: str, tool_name: str, category: str, reason: str) -> str:
     return template.format(tool_name=tool_name, category=category, reason=reason or "no reason given")
 

@@ -22,7 +22,7 @@ from ..config import Settings
 from ..judges import ToolCall, Verdict
 from ..routing import Route, parse_route
 from .gate import JudgeRunner
-from .rewrite import normalize_tools, refusal_text, strip_denied_calls
+from .rewrite import merge_leading_system, normalize_tools, refusal_text, strip_denied_calls
 from .upstream import UpstreamPool
 
 RUN_HEADER = "x-vetobench-run"
@@ -80,6 +80,8 @@ def create_app(settings: Settings, pool: UpstreamPool | None = None) -> FastAPI:
         settings.apply_model_defaults(target, body)
         if body.get("tools"):
             body["tools"] = normalize_tools(body["tools"])
+        if body.get("messages"):
+            body["messages"] = merge_leading_system(body["messages"])
 
         try:
             r = await pool.post(target, "chat/completions", body)
