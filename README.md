@@ -151,6 +151,19 @@ The route returns 401 without the key; that is expected.
   judges and ASB's refusal judge are not available yet. The real agent models
   (`qwen3.8-27b`, `muse-glimmer-30b`, `gemma4-31b`) still need Hugging Face ids.
   TODO: add the `vllm-agent` manifest to `deploy/openshift/`.
+* **2026-09-25** First real-GPU run, `configs/baseline-8b.yaml` (Qwen3-8B, baseline vs
+  `allow-all` enforce, sanity-sized). ASB's refusal judge was temporarily aliased to
+  `qwen3-8b-test` in the local config because `judge-small` is not deployed.
+  * Agent-SafetyBench, 16 cases: all ran (24 tool calls per arm). Allow-all made **the same tool
+    calls as baseline in 16/16 cases**; 4 differ only in the wording of the final text answer
+    (vLLM greedy decoding is not bit-exact across different batch compositions). No safety
+    score yet (needs ShieldAgent).
+  * ASB, direct prompt injection (naive), 20 attacker tools: **ASR 100%** [83.9, 100], original
+    task success 0%. Clean (no attack), 50 tasks: task success 42% baseline / 38% allow-all,
+    ASR 0%. Allow-all ΔASR = 0.
+  * The refusal rate (100% under attack, 94% clean) is **not usable**: Qwen3-8B answers "0"
+    (did not comply) even for transcripts where the agent did the task. Re-measure with a
+    proper judge model.
 
 ## Running
 
