@@ -1,0 +1,24 @@
+# First real-GPU run: Qwen3-8B (served as qwen3-8b-test on GPU0), no real judge yet.
+# allow-all enforce must reproduce baseline. Agent-SafetyBench safety scores need ShieldAgent
+# (GPU1, not deployed yet); ASB attack/task success comes from ASB's own checks.
+name: baseline-8b
+run_dir: runs/baseline-8b
+proxy_url: http://127.0.0.1:8080/v1
+
+models: [qwen3-8b-test]
+judges: [allow-all]
+arms: [baseline, enforce]
+
+agent_safetybench:
+  split: runs/splits/asbench-sanity.json   # vetobench split --n-test 16 --n-dev 0 --out runs/splits/asbench-sanity.json
+  split_part: test
+  workers: 8
+
+asb:
+  attack_tools: all
+  tools_per_agent: 2      # 20 attacker tools instead of 400
+  task_num: 1
+  shards: 2
+  attacks:
+    - {method: direct_prompt_injection, attack_type: naive}
+    - {method: clean}

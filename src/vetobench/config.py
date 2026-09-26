@@ -42,7 +42,7 @@ class Upstream:
     base_url: str
     api_key: str = "EMPTY"
     models: list[str] = field(default_factory=list)
-    verify_tls: bool = True
+    verify_tls: bool | str = True  # or a CA bundle path (relative to the repo root)
     timeout_s: float = 600.0
 
 

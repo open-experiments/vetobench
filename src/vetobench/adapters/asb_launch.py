@@ -93,8 +93,25 @@ def main() -> None:
         sys.exit("pass --llm_name <model route> to main_attacker")
     model_registry.MODEL_REGISTRY[llm_name] = VetoLLM  # llms.py holds the same dict object
 
+    # AgentFactory shells out to `conda list` to check each example agent's requirements before
+    # activating it. The benchmark's agents are local, simulated-tool agents with nothing to
+    # install, and conda is usually absent, so treat requirements as satisfied.
+    from pyopenagi.agents.interact import Interactor
+    Interactor.check_reqs_installed = lambda self, agent: True
+
     sys.argv = ["main_attacker.py", *rest]
-    runpy.run_path(os.path.join(asb_dir, "main_attacker.py"), run_name="__main__")
+    try:
+        runpy.run_path(os.path.join(asb_dir, "main_attacker.py"), run_name="__main__")
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        # ASB's scheduler thread is non-daemon; a normal exit would hang forever.
+        os._exit(1)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":

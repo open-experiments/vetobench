@@ -61,9 +61,96 @@ git -C third_party/Agent-SafetyBench checkout 74feea8de601b3a1449a93fcf70017fe61
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 ./scripts/setup_asb_env.sh            # clones ASB (pinned) + its own venv at third_party/ASB/.venv
 cp configs/vetobench.example.yaml configs/vetobench.yaml   # fill in routes; export VETOBENCH_API_KEY
+                                                           # (venice cluster: see "Cluster" below)
 ```
 
 Ask the cluster admin to serve the models in [`docs/cluster-request.md`](docs/cluster-request.md).
+
+## Cluster: `venice` OpenShift
+
+The harness and proxy run on a workstation; the cluster only serves models as OpenAI-compatible
+vLLM endpoints. We are admins of the `vetobench` project and nothing else (no nodes, no
+cluster-scoped objects, no operators), so only ever touch that namespace.
+
+| | |
+|---|---|
+| console | https://console-openshift-console.apps.venice.narlabs.io |
+| API server | `https://api.venice.narlabs.io:6443` (log in with the token from the console, user menu → *Copy login command*) |
+| project | `vetobench`, user `vetobench-admin` |
+| GPUs | 2 × NVIDIA RTX PRO 6000 Blackwell, 96 GB each, on one node |
+| quota `vetobench-guardrail` | 2 GPUs; requests 24 CPU / 96Gi, limits 48 CPU / 192Gi; 1Ti storage, 30 PVCs, 60 pods |
+| LimitRange | container max 24 CPU / 96Gi; **every container must set explicit cpu and memory limits** (the default limit is 1 CPU, so larger requests are rejected) |
+| storage | StorageClass `lvms-vg1` (default, RWO, local LVM) |
+| routes | `https://<route>-vetobench.apps.venice.narlabs.io`, edge TLS, 15 min timeout |
+
+**TLS.** The router certificate is signed by the cluster's self-signed ingress CA
+(`CN=ingress-operator@1784587897`, valid until 2028-07-19), so plain `curl` fails with
+*self-signed certificate in certificate chain*. Use the CA bundle `venice-ca.crt` (ask the
+project owner for it); it also covers the API server, so it works for `oc login` too. Don't
+disable verification. In `configs/vetobench.yaml`, `verify_tls` takes the bundle path
+(relative to the repo root, or absolute); the venice config defaults to `../venice-ca.crt`
+and can be overridden with `VETOBENCH_CA_BUNDLE`.
+
+**Secrets.** `Secret vllm-secrets` holds `VLLM_API_KEY` (bearer token for all routes) and
+`HF_TOKEN` (for gated models). Never print, log or commit them. Get the key into your shell
+without echoing it:
+
+```bash
+oc login --server=https://api.venice.narlabs.io:6443 --certificate-authority=venice-ca.crt --token=...
+export VETOBENCH_API_KEY=$(oc get secret vllm-secrets -n vetobench -o jsonpath='{.data.VLLM_API_KEY}' | base64 -d)
+```
+
+### What is deployed
+
+| GPU | object | served model | route | status |
+|---|---|---|---|---|
+| 0 | `Deployment vllm-agent` | `qwen3-8b-test` = `Qwen/Qwen3-8B`, tool parser `hermes` | `https://vllm-agent-vetobench.apps.venice.narlabs.io/v1` | running, verified 2026-09-25 |
+| 1 | `vllm-small` (one pod, four `vllm serve` processes) | `judge-small`, `granite-guardian`, `llama-guard`, `shieldagent` | `vllm-<served name>-vetobench…` | **not deployed yet** |
+
+`vllm-agent`: image `docker.io/vllm/vllm-openai:latest` (vLLM 0.30.0), 1 GPU, `strategy:
+Recreate`, cpu 4/12, memory 32Gi/64Gi, `/dev/shm` 16Gi, model cache on `PVC model-cache`
+(300Gi, mounted at `/models`, `HF_HOME=/models/hf`). The model is chosen by env vars
+`MODEL_ID`, `SERVED_NAME`, `TOOL_PARSER`; flags `--enable-auto-tool-choice --tool-call-parser
+$TOOL_PARSER --max-model-len 32768 --gpu-memory-utilization 0.92 --dtype bfloat16 --api-key
+$VLLM_API_KEY`. With Qwen3-8B it gets a 68 GiB KV cache (about 15× concurrency at 32k context).
+Exposed by `Service vllm-agent` (port 8000) and `Route vllm-agent`. Known cosmetic warning
+"Unknown vLLM environment variable VLLM_AGENT_*" comes from service links
+(`enableServiceLinks: false` removes it).
+
+Swap the agent model under test (the served name must match the experiment config exactly,
+and the tool parser must fit the model family):
+
+```bash
+oc set env deploy/vllm-agent MODEL_ID=<hf id> SERVED_NAME=<served name> TOOL_PARSER=<parser>
+```
+
+The 27–31B agent models are expected to fit in BF16; if they run out of memory at 32k context
+and 16 parallel episodes, add `--quantization fp8` and record it here.
+
+GPU1 plan: pods can't share a GPU (no fractional requests), so one pod requests
+`nvidia.com/gpu: 1` and runs four `vllm serve` processes on ports 8001–8004, each with
+`--gpu-memory-utilization ~0.2` and a smaller `--max-model-len`, under a supervisor that exits
+if any child dies. One Service (4 ports), four Routes. The two pods together must stay within
+96Gi of memory requests. Manifests go in `deploy/openshift/`.
+
+### Checking an endpoint
+
+```bash
+export VETOBENCH_AGENT_URL=https://vllm-agent-vetobench.apps.venice.narlabs.io/v1
+curl -s --cacert venice-ca.crt $VETOBENCH_AGENT_URL/models -H "Authorization: Bearer $VETOBENCH_API_KEY"
+vetobench smoke --agents qwen3-8b-test --judges allow-all
+```
+
+The route returns 401 without the key; that is expected.
+
+### Status log
+
+* **2026-09-25** `vllm-agent` verified from the workstation: `/v1/models` lists
+  `qwen3-8b-test`, and `vetobench smoke` gets a parsed tool call
+  (`get_weather(city="Paris")`, ~1.8 s). GPU1 is empty, so ShieldAgent scoring, the real
+  judges and ASB's refusal judge are not available yet. The real agent models
+  (`qwen3.8-27b`, `muse-glimmer-30b`, `gemma4-31b`) still need Hugging Face ids.
+  TODO: add the `vllm-agent` manifest to `deploy/openshift/`.
 
 ## Running
 

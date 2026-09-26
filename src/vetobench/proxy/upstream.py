@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ssl
+
 import httpx
 
 from ..config import Settings, Upstream
@@ -21,13 +23,21 @@ class UpstreamPool:
         self._transport = transport  # injectable for tests
         self._clients: dict[str, httpx.AsyncClient] = {}
 
+    def _verify(self, up: Upstream) -> bool | ssl.SSLContext:
+        """A string is a CA bundle, e.g. the OpenShift ingress CA of a cluster with a
+        self-signed router certificate."""
+        if isinstance(up.verify_tls, bool):
+            return up.verify_tls
+        ca = self.settings.root / up.verify_tls  # an absolute path stays as is
+        return ssl.create_default_context(cafile=str(ca))
+
     def client(self, up: Upstream) -> httpx.AsyncClient:
         if up.name not in self._clients:
             self._clients[up.name] = httpx.AsyncClient(
                 base_url=up.base_url.rstrip("/") + "/",
                 headers={"Authorization": f"Bearer {up.api_key}"},
                 timeout=httpx.Timeout(up.timeout_s, connect=30.0),
-                verify=up.verify_tls,
+                verify=self._verify(up),
                 limits=httpx.Limits(max_connections=256, max_keepalive_connections=64),
                 transport=self._transport,
             )

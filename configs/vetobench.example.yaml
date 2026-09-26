@@ -10,6 +10,7 @@ upstreams:
     api_key: ${VETOBENCH_API_KEY:-EMPTY}
     models: [qwen3.8-27b, muse-glimmer-30b, gemma4-31b]
     timeout_s: 900
+    # verify_tls: path/to/ca.crt   # CA bundle for a self-signed router cert (default: true)
   - name: small            # GPU1: judge candidates, ShieldAgent scorer, ASB refusal judge
     base_url: ${VETOBENCH_SMALL_URL:-https://small.apps.example.com/v1}
     api_key: ${VETOBENCH_API_KEY:-EMPTY}
