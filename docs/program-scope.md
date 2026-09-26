@@ -117,3 +117,52 @@ Record gap in `vetobench/v1` (from `proxy/app.py` and `audit.py`):
 
 Open items: harness base, gate order, BFCL inclusion, Decision 1.0 on NVIDIA, packing four small
 models on one GPU, record schema v2.
+
+## Progress (as of 2026-09-26)
+
+Phase 2 (serve and pilot) has started on the reference cluster; Phase 0 and Phase 1 work has
+not. Details, commands and the dated status log are in the README section *Cluster: `venice`
+OpenShift*.
+
+* **Serving.** The `vetobench` project serves the agent model on GPU0 as a vLLM Deployment
+  behind an HTTPS route. Manifests are in `deploy/openshift/`;
+  `scripts/swap-agent-model.sh <served name>` swaps the agent model and waits until it is
+  served. GPU1 is still empty.
+* **Harness to cluster.** The routes use the cluster's self-signed ingress CA, so an
+  upstream's `verify_tls` now takes a CA bundle path and verification stays on.
+  `vetobench smoke` passes the agent tool-call check for both models served so far.
+* **Agent models.** `qwen3.8-27b` is `Qwen/Qwen3.8-27B`, served in BF16 (FP8 not needed) with
+  tool parser `qwen3_xml`, text only, and `--max-num-seqs 64` (vLLM's default does not fit its
+  linear-attention state). Typed tool arguments parse correctly and thinking is off.
+  `Qwen/Qwen3-8B` (`qwen3-8b-test`) stays available for pipeline tests. The Hugging Face ids
+  for `muse-glimmer-30b` and `gemma4-31b` are still open.
+* **First measurements** (Qwen3-8B, sanity-sized, no real judge yet; `configs/baseline-8b.yaml`):
+  * The allow-all control made the same tool calls as baseline in 16/16 Agent-SafetyBench
+    cases. Four differ only in the wording of the final text answer (vLLM greedy decoding is
+    not bit-exact across batch compositions).
+  * ASB direct prompt injection (naive), 20 attacker tools: attack success 100% (20/20, 95% CI
+    83.9–100); original-task success 0%.
+  * ASB clean, 50 tasks: task success 42% baseline and 38% allow-all; attack success 0%.
+  * Not yet available: the Agent-SafetyBench safety score (needs ShieldAgent). The ASB refusal
+    rate is not usable, because Qwen3-8B, standing in as ASB's refusal judge, marks completed
+    tasks as refusals.
+* **Fixes on the way.** The ASB launcher no longer needs conda and no longer hangs at exit.
+
+## What's next
+
+1. **Sanity run on `qwen3.8-27b`**: baseline and allow-all, same size as the 8B run. Needs a
+   copy of `configs/baseline-8b.yaml` with the model changed.
+2. **GPU1 small models**: one pod requesting one GPU runs `judge-small`, `granite-guardian`,
+   `llama-guard` and `shieldagent` as four vLLM servers (ports 8001–8004, about 0.2 of GPU
+   memory each), behind one Service and four routes. `llama-guard` is gated and needs
+   `HF_TOKEN`. The two pods together must stay within the 96Gi memory-request quota.
+3. **Score and re-measure**: score the Agent-SafetyBench runs with ShieldAgent (finished runs are
+   scored without re-running), point ASB's refusal judge back to `judge-small`, and re-measure
+   refusal.
+4. **Remaining agent models**: get the Hugging Face ids for `muse-glimmer-30b` and `gemma4-31b`,
+   add them to the swap script with their tool parsers, and run the smoke check.
+5. **Pilot**: the 300-case Agent-SafetyBench split and all 400 ASB attacker tools across the
+   five attack settings, per agent model; baseline plus enforce per judge; replay all judges on
+   the baseline calls; report.
+6. **Phase 0 (no GPUs)**: the `vetobench/v2` record, the `rule` and `classifier` judge kinds, and
+   the twelve-call regression suite. Not started.
