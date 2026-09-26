@@ -108,18 +108,18 @@ export VETOBENCH_API_KEY=$(oc get secret vllm-secrets -n vetobench -o jsonpath='
 
 | GPU | object | served model | route | status |
 |---|---|---|---|---|
-| 0 | `Deployment vllm-agent` | `qwen3-8b-test` = `Qwen/Qwen3-8B`, tool parser `hermes` | `https://vllm-agent-vetobench.apps.venice.narlabs.io/v1` | running, verified 2026-09-25 |
+| 0 | `Deployment vllm-agent` | `qwen3.8-27b` = `Qwen/Qwen3.8-27B`, tool parser `qwen3_xml` (swap with `scripts/swap-agent-model.sh`) | `https://vllm-agent-vetobench.apps.venice.narlabs.io/v1` | running, verified 2026-09-26 |
 | 1 | `vllm-small` (one pod, four `vllm serve` processes) | `judge-small`, `granite-guardian`, `llama-guard`, `shieldagent` | `vllm-<served name>-vetobench…` | **not deployed yet** |
 
 `vllm-agent`: image `docker.io/vllm/vllm-openai:latest` (vLLM 0.30.0), 1 GPU, `strategy:
-Recreate`, cpu 4/12, memory 32Gi/64Gi, `/dev/shm` 16Gi, model cache on `PVC model-cache`
+Recreate`, `progressDeadlineSeconds: 3600`, cpu 4/12, memory 32Gi/64Gi, `/dev/shm` 16Gi, model cache on `PVC model-cache`
 (300Gi, mounted at `/models`, `HF_HOME=/models/hf`). The model is chosen by env vars
 `MODEL_ID`, `SERVED_NAME`, `TOOL_PARSER`; flags `--enable-auto-tool-choice --tool-call-parser
 $TOOL_PARSER --max-model-len 32768 --gpu-memory-utilization 0.92 --dtype bfloat16 --api-key
-$VLLM_API_KEY`. With Qwen3-8B it gets a 68 GiB KV cache (about 15× concurrency at 32k context).
-Exposed by `Service vllm-agent` (port 8000) and `Route vllm-agent`. Known cosmetic warning
-"Unknown vLLM environment variable VLLM_AGENT_*" comes from service links
-(`enableServiceLinks: false` removes it).
+$VLLM_API_KEY $EXTRA_ARGS`. Manifest: `deploy/openshift/vllm-agent.yaml`. With Qwen3-8B it gets a 68 GiB KV cache (about 15× concurrency at 32k context).
+Exposed by `Service vllm-agent` (port 8000) and `Route vllm-agent`. `enableServiceLinks: false`
+keeps vLLM from warning about `VLLM_AGENT_*` service-link variables. Applying the manifest resets
+the model to its defaults (Qwen3-8B); run the swap script afterwards.
 
 Swap the agent model under test with `scripts/swap-agent-model.sh <served name>` (e.g.
 `qwen3.8-27b`). It sets `MODEL_ID`, `SERVED_NAME`, `TOOL_PARSER` and `EXTRA_ARGS` on
@@ -131,7 +131,7 @@ parser for its family (see the model's vLLM recipe at https://recipes.vllm.ai), 
 | served name | Hugging Face id | tool parser | extra flags |
 |---|---|---|---|
 | `qwen3-8b-test` | `Qwen/Qwen3-8B` | `hermes` | |
-| `qwen3.8-27b` | `Qwen/Qwen3.8-27B` | `qwen3_xml` | `--language-model-only --reasoning-parser qwen3` |
+| `qwen3.8-27b` | `Qwen/Qwen3.8-27B` | `qwen3_xml` | `--language-model-only --reasoning-parser qwen3 --max-num-seqs 64` |
 | `muse-glimmer-30b` | TBD | | |
 | `gemma4-31b` | TBD | | |
 
@@ -248,3 +248,11 @@ tests/          unit + proxy tests, fake_vllm.py (GPU-free end-to-end stand-in)
 
 GPU-free end-to-end check: `uvicorn tests.fake_vllm:app --port 18000`, then point a copy of the
 config at `http://127.0.0.1:18000/v1` and run `configs/sanity.yaml`.
+* **2026-09-26** `vllm-agent` manifest exported to `deploy/openshift/`, then changed to pass
+  `$EXTRA_ARGS` and to disable service links. Swapped GPU0 to **`qwen3.8-27b`**
+  (`Qwen/Qwen3.8-27B`, BF16, no FP8 needed): first start downloads the weights in ~8 min
+  (50 GiB loaded), KV cache 479k tokens (14.6× at 32k context). It needs `--max-num-seqs 64`:
+  vLLM's default of 1024 sequences exceeds the 708 state blocks for its linear-attention
+  layers, and vLLM then refuses to start (crash loop). `vetobench smoke` passes (parsed tool
+  call, ~1.1 s); integer, boolean and array arguments come back with correct JSON types, and
+  `enable_thinking: false` leaves no reasoning text.

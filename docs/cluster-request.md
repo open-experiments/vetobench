@@ -7,7 +7,7 @@ back the route URL(s), a token, and the output of `GET /v1/models` for each rout
 
 | served name (`--served-model-name`) | HF model id | notes |
 |---|---|---|
-| `qwen3.8-27b` | [`Qwen/Qwen3.8-27B`](https://huggingface.co/Qwen/Qwen3.8-27B) | BF16 (27.8B); tool parser `qwen3_xml`, `--language-model-only` (it is a vision-language model) |
+| `qwen3.8-27b` | [`Qwen/Qwen3.8-27B`](https://huggingface.co/Qwen/Qwen3.8-27B) | BF16 (27.8B); tool parser `qwen3_xml`, `--language-model-only` (it is a vision-language model), `--max-num-seqs 64` (the default 1024 does not fit its linear-attention state) |
 | `muse-glimmer-30b` | _TBD_ | BF16 |
 | `gemma4-31b` | _TBD_ | BF16 |
 

@@ -6,6 +6,7 @@ metadata:
   name: vllm-agent
   namespace: vetobench
 spec:
+  progressDeadlineSeconds: 3600   # first start of a large model downloads its weights (startup probe allows 60 min)
   replicas: 1
   selector:
     matchLabels:
@@ -20,7 +21,7 @@ spec:
       containers:
       - args:
         - exec vllm serve "$MODEL_ID" --served-model-name "$SERVED_NAME" --host 0.0.0.0 --port 8000 --api-key "$VLLM_API_KEY" --enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER" --max-model-len
-          32768 --gpu-memory-utilization 0.92 --dtype bfloat16
+          32768 --gpu-memory-utilization 0.92 --dtype bfloat16 $EXTRA_ARGS
         command:
         - /bin/sh
         - -c
@@ -31,6 +32,8 @@ spec:
           value: qwen3-8b-test
         - name: TOOL_PARSER
           value: hermes
+        - name: EXTRA_ARGS    # extra vllm serve flags per model, set by scripts/swap-agent-model.sh
+          value: ''
         - name: HOME
           value: /models
         - name: HF_HOME
@@ -88,6 +91,7 @@ spec:
         - mountPath: /dev/shm
           name: shm
       dnsPolicy: ClusterFirst
+      enableServiceLinks: false   # avoids vLLM's 'Unknown vLLM environment variable VLLM_AGENT_*' warnings
       restartPolicy: Always
       schedulerName: default-scheduler
       securityContext: {}
